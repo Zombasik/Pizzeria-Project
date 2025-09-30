@@ -113,20 +113,33 @@ async def show_product(
     keyboard = get_catalog_keyboard(products, index, user_id)
 
     # Проверяем, есть ли фото
-    if product.image and os.path.exists(product.image):
+    if product.image:
         try:
-            photo = FSInputFile(product.image)
-            if edit:
-                # Редактируем сообщение с новым фото
-                media = InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML")
-                await message.edit_media(media=media, reply_markup=keyboard)
+            # Если это file_id от Telegram, используем его напрямую
+            if product.image.startswith('AgAC') or product.image.startswith('BAA'):
+                if edit:
+                    media = InputMediaPhoto(media=product.image, caption=caption, parse_mode="HTML")
+                    await message.edit_media(media=media, reply_markup=keyboard)
+                else:
+                    await message.answer_photo(
+                        photo=product.image,
+                        caption=caption,
+                        reply_markup=keyboard
+                    )
+            # Если это локальный файл
+            elif os.path.exists(product.image):
+                photo = FSInputFile(product.image)
+                if edit:
+                    media = InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML")
+                    await message.edit_media(media=media, reply_markup=keyboard)
+                else:
+                    await message.answer_photo(
+                        photo=photo,
+                        caption=caption,
+                        reply_markup=keyboard
+                    )
             else:
-                # Отправляем новое сообщение с фото
-                await message.answer_photo(
-                    photo=photo,
-                    caption=caption,
-                    reply_markup=keyboard
-                )
+                raise FileNotFoundError("Image not found")
         except Exception as e:
             # Если ошибка с фото, отправляем текст
             text = f"🖼 <i>Фото временно недоступно</i>\n\n{caption}"

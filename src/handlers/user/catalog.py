@@ -223,10 +223,18 @@ async def show_product_edit(message, product, index, products, user_id):
     keyboard = get_catalog_keyboard(products, index, user_id)
 
     # Проверяем, есть ли фото
-    if product.image and os.path.exists(product.image):
+    if product.image:
         try:
-            photo = FSInputFile(product.image)
-            media = InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML")
+            # Если это file_id от Telegram, используем его напрямую
+            if product.image.startswith('AgAC') or product.image.startswith('BAA'):
+                media = InputMediaPhoto(media=product.image, caption=caption, parse_mode="HTML")
+            # Если это локальный файл
+            elif os.path.exists(product.image):
+                photo = FSInputFile(product.image)
+                media = InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML")
+            else:
+                raise FileNotFoundError("Image not found")
+
             await message.edit_media(media=media, reply_markup=keyboard)
         except Exception:
             text = f"🖼 <i>Фото временно недоступно</i>\n\n{caption}"
