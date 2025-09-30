@@ -6,7 +6,8 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InputMediaPhoto, FSInputFile
 
-from src.services import ProductService, CartService
+from src.services import ProductService, CartService, OrderService
+from src.config import PAYMENT_TOKEN
 from src.keyboards.inline import (
     get_catalog_keyboard, get_cart_keyboard,
     get_main_menu_keyboard
@@ -66,20 +67,26 @@ async def quantity_change(callback: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("add_to_cart:"))
 async def add_to_cart(callback: types.CallbackQuery, state: FSMContext):
     """Добавить товар в корзину"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     parts = callback.data.split(":")
     product_id = int(parts[1])
 
     data = await state.get_data()
     quantity = data.get("quantity", 1)
 
+    logger.info(f"Добавление товара в корзину: user_id={callback.from_user.id}, product_id={product_id}, quantity={quantity}")
+
     session = get_db_session()
     try:
         cart_service = CartService(session)
-        cart_service.add_to_cart(
+        cart_item = cart_service.add_to_cart(
             user_id=callback.from_user.id,
             product_id=product_id,
             quantity=quantity
         )
+        logger.info(f"Товар добавлен в корзину: cart_item_id={cart_item.id}")
 
         # Сбрасываем количество
         await state.update_data(quantity=1)
@@ -89,6 +96,9 @@ async def add_to_cart(callback: types.CallbackQuery, state: FSMContext):
             show_alert=True
         )
 
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении в корзину: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка при добавлении в корзину", show_alert=True)
     finally:
         session.close()
 
@@ -96,17 +106,19 @@ async def add_to_cart(callback: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "show_cart")
 async def show_cart(callback: types.CallbackQuery):
     """Показать корзину"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     session = get_db_session()
     try:
         cart_service = CartService(session)
         cart_items = cart_service.get_user_cart(callback.from_user.id)
+        logger.info(f"Корзина пользователя {callback.from_user.id}: {len(cart_items)} товаров")
 
         if not cart_items:
-            await callback.message.edit_text(
-                "🛒 <b>Ваша корзина пуста</b>\n\n"
-                "Добавьте товары из каталога!",
-                reply_markup=get_main_menu_keyboard()
-            )
+            cart_text = "🛒 <b>Ваша корзина пуста</b>\n\n" \
+                       "Добавьте товары из каталога!"
+            keyboard = get_main_menu_keyboard()
         else:
             cart_text = "🛒 <b>ВАША КОРЗИНА</b>\n"
             cart_text += "━━━━━━━━━━━━━━━━━━━\n\n"
@@ -122,10 +134,20 @@ async def show_cart(callback: types.CallbackQuery):
             cart_text += f"💰 <b>ИТОГО: {total_price:.0f} руб.</b>"
 
             keyboard = get_cart_keyboard(cart_items, total_price)
+
+        # Если сообщение содержит фото, удаляем и отправляем новое
+        try:
             await callback.message.edit_text(cart_text, reply_markup=keyboard)
+        except Exception:
+            # Если не получилось отредактировать (например, это было фото), удаляем и отправляем новое
+            await callback.message.delete()
+            await callback.message.answer(cart_text, reply_markup=keyboard)
 
         await callback.answer()
 
+    except Exception as e:
+        logger.error(f"Ошибка при показе корзины: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка при загрузке корзины", show_alert=True)
     finally:
         session.close()
 
@@ -138,18 +160,22 @@ async def clear_cart(callback: types.CallbackQuery):
         cart_service = CartService(session)
         cart_service.clear_cart(callback.from_user.id)
 
-        await callback.message.edit_text(
-            "🗑 <b>Корзина очищена</b>\n\n"
-            "Выберите товары из каталога!",
-            reply_markup=get_main_menu_keyboard()
-        )
+        text = "🗑 <b>Корзина очищена</b>\n\n" \
+               "Выберите товары из каталога!"
+
+        try:
+            await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+        except Exception:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=get_main_menu_keyboard())
+
         await callback.answer("✅ Корзина очищена", show_alert=True)
 
     finally:
         session.close()
 
 
-@router.callback_query(F.data == "back_to_catalog" | F.data == "show_catalog")
+@router.callback_query((F.data == "back_to_catalog") | (F.data == "show_catalog"))
 async def back_to_catalog(callback: types.CallbackQuery, state: FSMContext):
     """Вернуться к каталогу"""
     session = get_db_session()
@@ -158,18 +184,22 @@ async def back_to_catalog(callback: types.CallbackQuery, state: FSMContext):
         products = product_service.get_all_products(available_only=True)
 
         if not products:
-            await callback.message.edit_text(
-                "🍕 <b>Каталог временно недоступен</b>\n\n"
-                "Попробуйте позже!",
-                reply_markup=get_main_menu_keyboard()
-            )
+            text = "🍕 <b>Каталог временно недоступен</b>\n\n" \
+                   "Попробуйте позже!"
+            try:
+                await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+            except Exception:
+                await callback.message.delete()
+                await callback.message.answer(text, reply_markup=get_main_menu_keyboard())
         else:
             # Сохраняем список товаров в состояние
             await state.update_data(products=products, current_index=0, quantity=1)
 
             # Показываем первый товар
             product = products[0]
-            await show_product_edit(
+            # Удаляем текстовое сообщение и отправляем фото
+            await callback.message.delete()
+            await show_product_send(
                 callback.message, product, 0, products, callback.from_user.id
             )
 
@@ -182,11 +212,15 @@ async def back_to_catalog(callback: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "main_menu")
 async def show_main_menu(callback: types.CallbackQuery):
     """Показать главное меню"""
-    await callback.message.edit_text(
-        "📋 <b>ГЛАВНОЕ МЕНЮ</b>\n\n"
-        "Выберите раздел:",
-        reply_markup=get_main_menu_keyboard()
-    )
+    text = "📋 <b>ГЛАВНОЕ МЕНЮ</b>\n\n" \
+           "Выберите раздел:"
+
+    try:
+        await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=get_main_menu_keyboard())
+
     await callback.answer()
 
 
@@ -201,11 +235,258 @@ async def show_contacts(callback: types.CallbackQuery):
         "💬 Для заказа свяжитесь с нами!"
     )
 
-    await callback.message.edit_text(
-        contacts_text,
-        reply_markup=get_main_menu_keyboard()
-    )
+    try:
+        await callback.message.edit_text(contacts_text, reply_markup=get_main_menu_keyboard())
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(contacts_text, reply_markup=get_main_menu_keyboard())
+
     await callback.answer()
+
+
+@router.callback_query(F.data == "checkout")
+async def checkout(callback: types.CallbackQuery, state: FSMContext):
+    """Оформление заказа с оплатой"""
+    session = get_db_session()
+    try:
+        cart_service = CartService(session)
+        cart_items = cart_service.get_user_cart(callback.from_user.id)
+
+        if not cart_items:
+            await callback.answer("❌ Корзина пуста!", show_alert=True)
+            return
+
+        # Сохраняем корзину в состояние для последующей обработки
+        await state.update_data(cart_items=cart_items)
+
+        # Проверяем, настроена ли оплата
+        if not PAYMENT_TOKEN:
+            # Если токен не настроен, создаем заказ без оплаты
+            await create_order_without_payment(callback, cart_items, session)
+        else:
+            # Отправляем инвойс для оплаты
+            await send_invoice(callback, cart_items)
+
+        await callback.answer()
+
+    finally:
+        session.close()
+
+
+async def create_order_without_payment(callback, cart_items, session):
+    """Создание заказа без оплаты"""
+    order_service = OrderService(session)
+
+    order_data = {
+        'user_id': callback.from_user.id,
+        'status': 'pending',
+        'phone': None,
+        'address': None
+    }
+
+    items = [
+        {
+            'product_id': item['product_id'],
+            'quantity': item['quantity'],
+            'price': item['product_price']
+        }
+        for item in cart_items
+    ]
+
+    order = order_service.create_order(order_data, items)
+
+    # Очищаем корзину после создания заказа
+    cart_service = CartService(session)
+    cart_service.clear_cart(callback.from_user.id)
+
+    # Формируем сообщение о заказе
+    total_price = sum(item['total'] for item in cart_items)
+    order_text = f"✅ <b>ЗАКАЗ #{order.id} ОФОРМЛЕН!</b>\n"
+    order_text += "━━━━━━━━━━━━━━━━━━━\n\n"
+
+    for item in cart_items:
+        order_text += f"▫️ {item['product_name']}\n"
+        order_text += f"   {item['quantity']} x {item['product_price']:.0f} = "
+        order_text += f"<b>{item['total']:.0f} руб.</b>\n\n"
+
+    order_text += "━━━━━━━━━━━━━━━━━━━\n"
+    order_text += f"💰 <b>ИТОГО: {total_price:.0f} руб.</b>\n\n"
+    order_text += "📞 Мы свяжемся с вами для подтверждения заказа!\n"
+    order_text += "⏰ Статус заказа: <b>Ожидает подтверждения</b>"
+
+    try:
+        await callback.message.edit_text(order_text, reply_markup=get_main_menu_keyboard())
+    except Exception:
+        await callback.message.delete()
+        await callback.message.answer(order_text, reply_markup=get_main_menu_keyboard())
+
+
+async def send_invoice(callback, cart_items):
+    """Отправка инвойса для оплаты"""
+    from aiogram.types import LabeledPrice
+
+    # Формируем описание заказа
+    description = "Заказ в Pizza Bot:\n"
+    for item in cart_items:
+        description += f"• {item['product_name']} x{item['quantity']}\n"
+
+    # Формируем позиции для оплаты
+    prices = []
+    for item in cart_items:
+        prices.append(
+            LabeledPrice(
+                label=f"{item['product_name']} x{item['quantity']}",
+                amount=int(item['total'] * 100)  # Сумма в копейках
+            )
+        )
+
+    total_amount = int(sum(item['total'] for item in cart_items) * 100)
+
+    # Отправляем инвойс
+    await callback.message.answer_invoice(
+        title="Оплата заказа Pizza Bot",
+        description=description,
+        payload=f"order_{callback.from_user.id}",
+        provider_token=PAYMENT_TOKEN,
+        currency="RUB",
+        prices=prices,
+        start_parameter="pizza-bot-payment",
+        photo_url="https://via.placeholder.com/400x300.png?text=Pizza+Bot",
+        photo_width=400,
+        photo_height=300,
+        need_name=True,
+        need_phone_number=True,
+        need_email=False,
+        need_shipping_address=True,
+        is_flexible=False
+    )
+
+
+@router.pre_checkout_query()
+async def pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery):
+    """Обработка предоплатной проверки"""
+    await pre_checkout_query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def successful_payment(message: types.Message, state: FSMContext):
+    """Обработка успешной оплаты"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    payment_info = message.successful_payment
+    logger.info(f"Успешная оплата: user_id={message.from_user.id}, "
+                f"amount={payment_info.total_amount/100} {payment_info.currency}")
+
+    session = get_db_session()
+    try:
+        # Получаем корзину из состояния
+        data = await state.get_data()
+        cart_items = data.get('cart_items', [])
+
+        if not cart_items:
+            await message.answer(
+                "❌ Ошибка: корзина пуста",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+
+        # Создаем заказ
+        order_service = OrderService(session)
+
+        order_data = {
+            'user_id': message.from_user.id,
+            'status': 'paid',
+            'phone': payment_info.order_info.phone_number if payment_info.order_info else None,
+            'address': None
+        }
+
+        items = [
+            {
+                'product_id': item['product_id'],
+                'quantity': item['quantity'],
+                'price': item['product_price']
+            }
+            for item in cart_items
+        ]
+
+        order = order_service.create_order(order_data, items)
+
+        # Очищаем корзину
+        cart_service = CartService(session)
+        cart_service.clear_cart(message.from_user.id)
+
+        # Очищаем состояние
+        await state.clear()
+
+        # Формируем сообщение
+        total_price = sum(item['total'] for item in cart_items)
+        order_text = f"✅ <b>ОПЛАТА ПРОШЛА УСПЕШНО!</b>\n\n"
+        order_text += f"📦 <b>Заказ #{order.id}</b>\n"
+        order_text += "━━━━━━━━━━━━━━━━━━━\n\n"
+
+        for item in cart_items:
+            order_text += f"▫️ {item['product_name']}\n"
+            order_text += f"   {item['quantity']} x {item['product_price']:.0f} = "
+            order_text += f"<b>{item['total']:.0f} руб.</b>\n\n"
+
+        order_text += "━━━━━━━━━━━━━━━━━━━\n"
+        order_text += f"💰 <b>Оплачено: {total_price:.0f} руб.</b>\n\n"
+        order_text += "🚚 Ваш заказ принят в обработку!\n"
+        order_text += "📞 Мы свяжемся с вами в ближайшее время."
+
+        await message.answer(order_text, reply_markup=get_main_menu_keyboard())
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке оплаты: {e}", exc_info=True)
+        await message.answer(
+            "❌ Произошла ошибка при обработке заказа. Свяжитесь с поддержкой.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    finally:
+        session.close()
+
+
+async def show_product_send(message, product, index, products, user_id):
+    """Вспомогательная функция для отправки нового сообщения с товаром"""
+    caption = f"<b>{product.name}</b>\n\n"
+
+    if product.description:
+        caption += f"{product.description}\n\n"
+
+    if product.category:
+        caption += f"📍 Категория: {product.category}\n"
+
+    caption += f"💰 Цена: <b>{product.price:.0f} руб.</b>"
+
+    keyboard = get_catalog_keyboard(products, index, user_id)
+
+    # Проверяем, есть ли фото
+    if product.image:
+        try:
+            # Если это file_id от Telegram, используем его напрямую
+            if product.image.startswith('AgAC') or product.image.startswith('BAA'):
+                await message.answer_photo(
+                    photo=product.image,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+            # Если это локальный файл
+            elif os.path.exists(product.image):
+                photo = FSInputFile(product.image)
+                await message.answer_photo(
+                    photo=photo,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+            else:
+                raise FileNotFoundError("Image not found")
+        except Exception:
+            text = f"🖼 <i>Фото временно недоступно</i>\n\n{caption}"
+            await message.answer(text, reply_markup=keyboard)
+    else:
+        text = f"🖼 <i>Фото отсутствует</i>\n\n{caption}"
+        await message.answer(text, reply_markup=keyboard)
 
 
 async def show_product_edit(message, product, index, products, user_id):

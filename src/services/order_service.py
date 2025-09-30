@@ -14,11 +14,18 @@ class OrderService:
 
     def create_order(self, order_data: dict, items: List[dict]) -> Order:
         """Создать новый заказ с позициями"""
+        # Вычисляем общую стоимость заказа
+        total_price = sum(item_data['price'] * item_data['quantity'] for item_data in items)
+
+        # Добавляем total_price в данные заказа
+        order_data['total_price'] = total_price
+
+        # Создаем заказ
         order = Order(**order_data)
         self.session.add(order)
         self.session.flush()  # Получаем ID заказа
 
-        total_price = 0
+        # Добавляем позиции заказа
         for item_data in items:
             order_item = OrderItem(
                 order_id=order.id,
@@ -27,9 +34,7 @@ class OrderService:
                 price=item_data['price']
             )
             self.session.add(order_item)
-            total_price += item_data['price'] * item_data['quantity']
 
-        order.total_price = total_price
         self.session.commit()
         self.session.refresh(order)
         return order

@@ -3,7 +3,6 @@
 """
 import re
 import os
-from datetime import datetime
 from aiogram import Router, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import InputMediaPhoto, FSInputFile
@@ -11,7 +10,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from src.config import ADMIN_IDS, RESTRICTED_WORDS
-from src.keyboards.reply import star_kb
 from src.keyboards.inline import (
     get_catalog_keyboard, get_cart_keyboard,
     get_main_menu_keyboard, get_confirm_order_keyboard
@@ -56,14 +54,14 @@ async def start_command(message: types.Message):
         )
 
     await message.answer(
-        f"👋 Добро пожаловать в Pizza Bot!\n"
-        f"Ваш Telegram ID: <code>{user_id}</code>{admin_info}",
-        reply_markup=star_kb
+        f"👋 <b>Добро пожаловать в Pizza Bot!</b>\n\n"
+        f"Ваш ID: <code>{user_id}</code>{admin_info}\n\n"
+        f"Выберите действие:",
+        reply_markup=get_main_menu_keyboard()
     )
 
 
 @router.message(Command("menu"))
-@router.message(F.text.lower() == "🍕 меню")
 async def menu_command(message: types.Message, state: FSMContext):
     """Показать каталог товаров с фотографиями"""
     session = get_db_session()
@@ -76,7 +74,7 @@ async def menu_command(message: types.Message, state: FSMContext):
                 "🍕 <b>Меню нашей пиццерии</b>\n\n"
                 "К сожалению, сейчас нет доступных товаров.\n"
                 "Попробуйте позже!",
-                reply_markup=star_kb
+                reply_markup=get_main_menu_keyboard()
             )
             return
 
@@ -156,13 +154,6 @@ async def show_product(
             await message.answer(text, reply_markup=keyboard)
 
 
-@router.message(F.text.lower() == "время")
-async def time_command(message: types.Message):
-    """Показать текущее время"""
-    current_time = datetime.now().strftime("%H:%M:%S")
-    await message.reply(f"Сейчас {current_time}")
-
-
 @router.message(F.text)
 async def text_filter(message: types.Message):
     """Фильтр запрещенных слов"""
@@ -178,12 +169,14 @@ async def text_filter(message: types.Message):
 
     # Обработка других текстовых сообщений
     if message.text.lower() in ["привет", "hello", "hi"]:
-        await message.answer(f"Привет, {message.from_user.first_name}! 👋")
+        await message.answer(
+            f"Привет, {message.from_user.first_name}! 👋",
+            reply_markup=get_main_menu_keyboard()
+        )
     elif message.text.lower() in ["спасибо", "благодарю"]:
-        await message.answer("Пожалуйста! 😊")
+        await message.answer("Пожалуйста! 😊", reply_markup=get_main_menu_keyboard())
     else:
         # Стандартный ответ на неизвестные сообщения
         await message.answer(
-            "🤔 Не понимаю. Используйте кнопки меню для навигации.",
-            reply_markup=star_kb
+            "🤔 Не понимаю. Используйте команду /start для начала работы."
         )
