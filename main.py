@@ -21,12 +21,12 @@ async def main():
     setup_logging()
     logger = logging.getLogger(__name__)
 
-    logger.info("🚀 Запуск Pizza Bot...")
+    logger.info("Запуск Pizza Bot...")
 
     try:
         # Инициализация базы данных
         db_manager = get_db_manager()
-        logger.info("✅ База данных инициализирована")
+        logger.info("База данных инициализирована")
 
         # Создание бота и диспетчера
         bot = create_bot()
@@ -34,28 +34,29 @@ async def main():
 
         # Настройка команд бота
         await setup_bot_commands(bot)
-        logger.info("✅ Команды бота настроены")
+        logger.info("Команды бота настроены")
 
         # Очистка вебхуков
         await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("✅ Вебхуки очищены")
+        logger.info("Вебхуки очищены")
 
         # Запуск поллинга
-        logger.info("🎯 Бот запущен и готов к работе!")
+        logger.info("Бот запущен и готов к работе!")
+        print("Bot successfully started! Press Ctrl+C to stop.")
         await dp.start_polling(bot)
 
     except Exception as e:
-        logger.error(f"❌ Ошибка при запуске бота: {e}")
+        logger.error(f"Ошибка при запуске бота: {e}")
         raise
     finally:
-        logger.info("🛑 Бот завершает работу...")
+        logger.info("Бот завершает работу...")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("👋 Бот остановлен пользователем")
+        print("Bot stopped by user")
     except Exception as e:
-        print(f"💥 Критическая ошибка: {e}")
+        print(f"Critical error: {e}")
         sys.exit(1)

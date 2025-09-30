@@ -2,16 +2,30 @@
 Основные обработчики для пользователей
 """
 import re
+import os
 from datetime import datetime
 from aiogram import Router, F, types
 from aiogram.filters import CommandStart, Command
+from aiogram.types import InputMediaPhoto, FSInputFile
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from src.config import ADMIN_IDS, RESTRICTED_WORDS
 from src.keyboards.reply import star_kb
-from src.services import UserService
+from src.keyboards.inline import (
+    get_catalog_keyboard, get_cart_keyboard,
+    get_main_menu_keyboard, get_confirm_order_keyboard
+)
+from src.services import UserService, ProductService, CartService
 from src.bot.dependencies import get_db_session
 
 router = Router()
+
+
+class CatalogState(StatesGroup):
+    """Состояния для работы с каталогом"""
+    browsing = State()
+    quantity_selection = State()
 
 
 @router.message(CommandStart())
@@ -50,13 +64,83 @@ async def start_command(message: types.Message):
 
 @router.message(Command("menu"))
 @router.message(F.text.lower() == "🍕 меню")
-async def menu_command(message: types.Message):
-    """Показать меню пиццерии"""
-    await message.answer(
-        "🍕 <b>Меню нашей пиццерии</b>\n\n"
-        "Скоро здесь будет список наших вкусных пицц!",
-        reply_markup=star_kb
-    )
+async def menu_command(message: types.Message, state: FSMContext):
+    """Показать каталог товаров с фотографиями"""
+    session = get_db_session()
+    try:
+        product_service = ProductService(session)
+        products = product_service.get_all_products(available_only=True)
+
+        if not products:
+            await message.answer(
+                "🍕 <b>Меню нашей пиццерии</b>\n\n"
+                "К сожалению, сейчас нет доступных товаров.\n"
+                "Попробуйте позже!",
+                reply_markup=star_kb
+            )
+            return
+
+        # Сохраняем список товаров в состояние
+        await state.update_data(products=products, current_index=0, quantity=1)
+        await state.set_state(CatalogState.browsing)
+
+        # Показываем первый товар
+        await show_product(message, products[0], 0, products, message.from_user.id)
+
+    finally:
+        session.close()
+
+
+async def show_product(
+    message: types.Message,
+    product,
+    index: int,
+    products: list,
+    user_id: int,
+    edit: bool = False
+):
+    """Показать товар с фото и описанием"""
+    caption = f"<b>{product.name}</b>\n\n"
+
+    if product.description:
+        caption += f"{product.description}\n\n"
+
+    if product.category:
+        caption += f"📍 Категория: {product.category}\n"
+
+    caption += f"💰 Цена: <b>{product.price:.0f} руб.</b>"
+
+    keyboard = get_catalog_keyboard(products, index, user_id)
+
+    # Проверяем, есть ли фото
+    if product.image and os.path.exists(product.image):
+        try:
+            photo = FSInputFile(product.image)
+            if edit:
+                # Редактируем сообщение с новым фото
+                media = InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML")
+                await message.edit_media(media=media, reply_markup=keyboard)
+            else:
+                # Отправляем новое сообщение с фото
+                await message.answer_photo(
+                    photo=photo,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+        except Exception as e:
+            # Если ошибка с фото, отправляем текст
+            text = f"🖼 <i>Фото временно недоступно</i>\n\n{caption}"
+            if edit:
+                await message.edit_text(text, reply_markup=keyboard)
+            else:
+                await message.answer(text, reply_markup=keyboard)
+    else:
+        # Если фото нет, отправляем текстовое сообщение
+        text = f"🖼 <i>Фото отсутствует</i>\n\n{caption}"
+        if edit:
+            await message.edit_text(text, reply_markup=keyboard)
+        else:
+            await message.answer(text, reply_markup=keyboard)
 
 
 @router.message(F.text.lower() == "время")
