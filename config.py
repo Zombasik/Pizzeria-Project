@@ -24,4 +24,4 @@ ADMIN_URL = 'http://localhost:5000'
 TOKEN_LIFETIME_HOURS = 1
 
 # Запрещенные слова для фильтра
-RESTRICTED_WORDS = {'нахуй', 'жопу', 'нафиг'}
+RESTRICTED_WORDS = {'какашка', 'попа', 'нафиг'}

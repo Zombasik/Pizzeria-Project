@@ -116,8 +116,13 @@ async def show_cart(callback: types.CallbackQuery):
         logger.info(f"Корзина пользователя {callback.from_user.id}: {len(cart_items)} товаров")
 
         if not cart_items:
-            cart_text = "🛒 <b>Ваша корзина пуста</b>\n\n" \
-                       "Добавьте товары из каталога!"
+            cart_text = (
+                "🛒 <b>КОРЗИНА</b>\n"
+                "━━━━━━━━━━━━━━━━━━━\n\n"
+                "📭 Ваша корзина пуста\n\n"
+                "Загляните в наше меню и выберите\n"
+                "что-то вкусное! 🍕"
+            )
             keyboard = get_main_menu_keyboard()
         else:
             cart_text = "🛒 <b>ВАША КОРЗИНА</b>\n"
@@ -160,8 +165,13 @@ async def clear_cart(callback: types.CallbackQuery):
         cart_service = CartService(session)
         cart_service.clear_cart(callback.from_user.id)
 
-        text = "🗑 <b>Корзина очищена</b>\n\n" \
-               "Выберите товары из каталога!"
+        text = (
+            "🗑 <b>КОРЗИНА ОЧИЩЕНА</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "✅ Все товары удалены из корзины\n\n"
+            "Хотите начать новый заказ?\n"
+            "Загляните в наше меню! 🍕"
+        )
 
         try:
             await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
@@ -228,11 +238,24 @@ async def show_main_menu(callback: types.CallbackQuery):
 async def show_contacts(callback: types.CallbackQuery):
     """Показать контакты"""
     contacts_text = (
-        "📞 <b>НАШИ КОНТАКТЫ</b>\n\n"
-        "☎️ Телефон: +7 (999) 123-45-67\n"
-        "📍 Адрес: г. Москва, ул. Примерная, д. 1\n"
-        "⏰ Время работы: 10:00 - 22:00\n\n"
-        "💬 Для заказа свяжитесь с нами!"
+        "📞 <b>КОНТАКТЫ И ИНФОРМАЦИЯ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n\n"
+        "🍕 <b>Пиццерия Pizza Bot</b>\n\n"
+        "📍 <b>Адрес:</b>\n"
+        "г. Москва, ул. Примерная, д. 1\n"
+        "(рядом с метро «Примерная»)\n\n"
+        "📞 <b>Телефон для заказов:</b>\n"
+        "+7 (999) 123-45-67\n\n"
+        "⏰ <b>Время работы:</b>\n"
+        "Ежедневно: 10:00 - 22:00\n"
+        "Без выходных\n\n"
+        "🚚 <b>Доставка:</b>\n"
+        "• Бесплатно от 1000 руб.\n"
+        "• Среднее время: 30-45 минут\n"
+        "• По всей Москве\n\n"
+        "💳 <b>Оплата:</b>\n"
+        "Наличными, картой, онлайн\n\n"
+        "💬 Будем рады вашему заказу!"
     )
 
     try:
@@ -301,18 +324,22 @@ async def create_order_without_payment(callback, cart_items, session):
 
     # Формируем сообщение о заказе
     total_price = sum(item['total'] for item in cart_items)
-    order_text = f"✅ <b>ЗАКАЗ #{order.id} ОФОРМЛЕН!</b>\n"
+    order_text = f"✅ <b>ЗАКАЗ ОФОРМЛЕН!</b>\n"
     order_text += "━━━━━━━━━━━━━━━━━━━\n\n"
+    order_text += f"📦 <b>Номер заказа: #{order.id}</b>\n\n"
+    order_text += "<b>Состав заказа:</b>\n"
 
     for item in cart_items:
-        order_text += f"▫️ {item['product_name']}\n"
-        order_text += f"   {item['quantity']} x {item['product_price']:.0f} = "
+        order_text += f"• {item['product_name']}\n"
+        order_text += f"  {item['quantity']} шт. × {item['product_price']:.0f} = "
         order_text += f"<b>{item['total']:.0f} руб.</b>\n\n"
 
     order_text += "━━━━━━━━━━━━━━━━━━━\n"
     order_text += f"💰 <b>ИТОГО: {total_price:.0f} руб.</b>\n\n"
-    order_text += "📞 Мы свяжемся с вами для подтверждения заказа!\n"
-    order_text += "⏰ Статус заказа: <b>Ожидает подтверждения</b>"
+    order_text += "📞 Наш менеджер свяжется с вами\n"
+    order_text += "для подтверждения заказа в течение 10 минут\n\n"
+    order_text += "⏰ <b>Статус:</b> Ожидает подтверждения\n"
+    order_text += "🚚 <b>Доставка:</b> 30-45 минут после подтверждения"
 
     try:
         await callback.message.edit_text(order_text, reply_markup=get_main_menu_keyboard())
@@ -421,19 +448,24 @@ async def successful_payment(message: types.Message, state: FSMContext):
 
         # Формируем сообщение
         total_price = sum(item['total'] for item in cart_items)
-        order_text = f"✅ <b>ОПЛАТА ПРОШЛА УСПЕШНО!</b>\n\n"
-        order_text += f"📦 <b>Заказ #{order.id}</b>\n"
+        order_text = f"✅ <b>ОПЛАТА УСПЕШНА!</b>\n"
         order_text += "━━━━━━━━━━━━━━━━━━━\n\n"
+        order_text += f"🎉 Спасибо за покупку!\n\n"
+        order_text += f"📦 <b>Номер заказа: #{order.id}</b>\n"
+        order_text += f"💳 <b>Оплачено: {total_price:.0f} руб.</b>\n\n"
+        order_text += "<b>Состав заказа:</b>\n"
 
         for item in cart_items:
-            order_text += f"▫️ {item['product_name']}\n"
-            order_text += f"   {item['quantity']} x {item['product_price']:.0f} = "
+            order_text += f"• {item['product_name']}\n"
+            order_text += f"  {item['quantity']} шт. × {item['product_price']:.0f} = "
             order_text += f"<b>{item['total']:.0f} руб.</b>\n\n"
 
-        order_text += "━━━━━━━━━━━━━━━━━━━\n"
-        order_text += f"💰 <b>Оплачено: {total_price:.0f} руб.</b>\n\n"
-        order_text += "🚚 Ваш заказ принят в обработку!\n"
-        order_text += "📞 Мы свяжемся с вами в ближайшее время."
+        order_text += "━━━━━━━━━━━━━━━━━━━\n\n"
+        order_text += "🚚 <b>Ваш заказ принят в работу!</b>\n\n"
+        order_text += "📞 Мы свяжемся с вами для уточнения\n"
+        order_text += "деталей доставки в течение 10 минут\n\n"
+        order_text += "⏰ Ожидаемое время доставки: 30-45 минут\n\n"
+        order_text += "Приятного аппетита! 🍕"
 
         await message.answer(order_text, reply_markup=get_main_menu_keyboard())
 
